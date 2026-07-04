@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>시스템 빌드업 트래커</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<!-- Firebase compat SDK (file:// + 모바일 모두 지원) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+    :root {
+        --bg: #ffffff;
+        --fg: #000000;
+        --gray: #777777;
+        --light: #e0e0e0;
+        --bw: 2px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        background: var(--bg); color: var(--fg);
+        font-family: 'Pretendard', 'Helvetica Neue', Arial, sans-serif;
+        display: flex; flex-direction: column; align-items: center;
+        padding: 48px 24px 110px; min-height: 100vh;
+    }
+
+    /* ── 헤더 ── */
+    .top-bar {
+        width: 100%; max-width: 680px;
+        display: flex; align-items: center;
+        justify-content: space-between;
+        margin-bottom: 28px; gap: 12px;
+    }
+    .date-nav { display: flex; align-items: center; gap: 8px; }
+    .nav-btn {
+        width: 32px; height: 32px;
+        border: var(--bw) solid var(--fg); background: var(--bg);
+        font-size: 14px; font-weight: 800; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.1s, color 0.1s;
+    }
+    .nav-btn:hover { background: var(--fg); color: var(--bg); }
+    .date-display {
+        display: flex; flex-direction: column;
+        align-items: center; line-height: 1.1; min-width: 110px;
+    }
+    .date-main {
+        font-size: 20px; font-weight: 800;
+        font-family: 'Courier New', monospace; letter-spacing: 1px;
+    }
+    .date-sub { font-size: 10px; color: var(--gray); letter-spacing: 2px; font-weight: 700; margin-top: 2px; }
+    .top-actions { display: flex; align-items: center; gap: 6px; }
+    .pill-btn {
+        border: var(--bw) solid var(--fg); background: var(--bg);
+        font-size: 11px; font-weight: 700; padding: 6px 12px;
+        cursor: pointer; white-space: nowrap;
+        transition: background 0.1s, color 0.1s;
+    }
+    .pill-btn:hover { background: var(--fg); color: var(--bg); }
+    .calendar-wrap { position: relative; }
+    #date-picker {
+        position: absolute; top: 100%; left: 50%;
+        transform: translateX(-50%);
+        opacity: 0; width: 1px; height: 1px; pointer-events: none;
+    }
+
+    /* ── 통계 바 ── */
+    .stats-bar {
+        width: 100%; max-width: 680px;
+        display: grid; grid-template-columns: 1fr 1fr 1fr;
+        border: var(--bw) solid var(--fg); margin-bottom: 44px;
+    }
+    .stat-cell {
+        padding: 14px 12px; display: flex;
+        flex-direction: column; align-items: center; gap: 4px;
+        border-right: 1px solid var(--fg);
+    }
+    .stat-cell:last-child { border-right: none; }
+    .stat-value { font-size: 26px; font-weight: 800; font-family: 'Courier New', monospace; line-height: 1; }
+    .stat-label { font-size: 9px; color: var(--gray); letter-spacing: 1px; font-weight: 700; text-transform: uppercase; }
+
+    /* ── 보드 ── */
+    #capture-area {
+        width: 100%; display: flex;
+        flex-direction: column; align-items: center; background: var(--bg);
+    }
+    #board { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 52px; }
+    .section { display: flex; flex-direction: column; gap: 18px; }
+    .section-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding-bottom: 12px; border-bottom: var(--bw) solid var(--fg);
+        gap: 10px; flex-wrap: wrap;
+    }
+    .section-left { display: flex; align-items: center; gap: 12px; }
+    .section-tag {
+        font-size: 10px; font-weight: 800;
+        background: var(--fg); color: var(--bg);
+        padding: 4px 10px; letter-spacing: 2px;
+    }
+    .section-title { font-size: 17px; font-weight: 800; letter-spacing: 0.3px; }
+    .section-actions { display: flex; gap: 6px; }
+    .ghost-btn {
+        border: 1px solid var(--light); background: var(--bg);
+        font-size: 11px; font-weight: 700; padding: 5px 10px;
+        cursor: pointer; color: var(--gray); transition: all 0.1s;
+    }
+    .ghost-btn:hover { border-color: var(--fg); color: var(--fg); }
+
+    /* ── 항목 카드 ── */
+    .topic-item { display: flex; flex-direction: column; gap: 0; }
+    .topic-title-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+    .status-checkbox {
+        width: 18px; height: 18px;
+        border: var(--bw) solid var(--fg); border-radius: 0;
+        cursor: pointer; flex-shrink: 0; appearance: none;
+        position: relative; outline: none; background: var(--bg);
+        transition: background 0.1s;
+    }
+    .status-checkbox:checked { background: var(--fg); }
+    .status-checkbox:checked::after {
+        content: ''; position: absolute;
+        left: 4px; top: 1px; width: 5px; height: 9px;
+        border-right: 2px solid var(--bg); border-bottom: 2px solid var(--bg);
+        transform: rotate(45deg);
+    }
+    .item-num { font-size: 11px; color: var(--light); font-family: 'Courier New', monospace; font-weight: 700; flex-shrink: 0; width: 20px; }
+    .topic-title-input {
+        flex: 1; border: none; border-bottom: 1px solid transparent;
+        font-size: 15px; font-weight: 700; padding: 2px 4px;
+        outline: none; min-width: 0; background: transparent;
+        font-family: inherit; transition: border-color 0.15s;
+    }
+    .topic-title-input:focus { border-bottom-color: var(--fg); }
+    .topic-title-input.done-title { text-decoration: line-through; color: var(--gray); }
+    .delete-btn {
+        border: none; background: none; color: var(--light);
+        font-size: 14px; cursor: pointer; padding: 2px 4px;
+        flex-shrink: 0; line-height: 1; transition: color 0.1s;
+    }
+    .delete-btn:hover { color: var(--fg); }
+    .archive-btn {
+        border: 1px solid var(--light); background: none; color: var(--light);
+        font-size: 10px; cursor: pointer; padding: 3px 8px;
+        flex-shrink: 0; white-space: nowrap; transition: all 0.1s; font-weight: 700;
+    }
+    .archive-btn:hover { border-color: var(--fg); color: var(--fg); }
+    .content-wrap {
+        margin-left: 48px; border-left: 2px solid var(--light);
+        padding: 8px 0 8px 14px; margin-bottom: 6px;
+    }
+    .content-input {
+        width: 100%; border: none; resize: none; font-size: 13px;
+        outline: none; line-height: 1.7; background: transparent;
+        font-family: inherit; color: #333; min-height: 28px;
+    }
+    .content-input::placeholder { color: var(--light); }
+    .empty-note {
+        font-size: 12px; color: var(--light); padding: 16px;
+        border: 1px dashed var(--light); text-align: center; letter-spacing: 0.3px;
+    }
+    .add-row {
+        display: flex; align-items: center; gap: 10px;
+        cursor: pointer; width: fit-content;
+        opacity: 0.5; transition: opacity 0.15s; padding: 4px 0;
+    }
+    .add-row:hover { opacity: 1; }
+    .add-icon {
+        width: 24px; height: 24px; border: var(--bw) solid var(--fg);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px; font-weight: 800; flex-shrink: 0;
+    }
+    .add-label { font-size: 12px; font-weight: 700; letter-spacing: 0.3px; }
+
+    /* ── 인라인 폼 ── */
+    .inline-form { display: none; gap: 8px; align-items: center; border: var(--bw) solid var(--fg); padding: 10px 12px; }
+    .inline-form.open { display: flex; }
+    .inline-form input { flex: 1; border: none; border-bottom: 1px solid var(--fg); font-size: 13px; padding: 4px; outline: none; font-family: inherit; }
+    .inline-form button { border: var(--bw) solid var(--fg); background: var(--fg); color: var(--bg); font-size: 11px; font-weight: 700; padding: 6px 14px; cursor: pointer; white-space: nowrap; }
+
+    /* ── 보관함 ── */
+    .archive-panel { display: none; flex-direction: column; border: var(--bw) solid var(--light); padding: 12px; gap: 6px; }
+    .archive-panel.open { display: flex; }
+    .archive-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid #f0f0f0; gap: 10px; }
+    .archive-row:last-child { border-bottom: none; }
+    .restore-btn { border: 1px solid var(--fg); background: var(--bg); font-size: 10px; font-weight: 700; padding: 4px 10px; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+    .restore-btn:hover { background: var(--fg); color: var(--bg); }
+
+    /* ── 하단 고정 바 ── */
+    .bottom-fixed {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: linear-gradient(to top, rgba(255,255,255,1) 70%, rgba(255,255,255,0));
+        padding: 16px 24px 20px;
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .save-status { font-size: 10px; color: var(--gray); font-family: 'Courier New', monospace; letter-spacing: 0.5px; flex-shrink: 0; }
+    .save-status.synced { color: #2a9d5c; }
+    .save-status.error  { color: #e03e3e; }
+    .bottom-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .action-btn {
+        border: var(--bw) solid var(--fg); background: var(--bg);
+        font-size: 11px; font-weight: 700; padding: 8px 14px;
+        cursor: pointer; white-space: nowrap;
+        transition: background 0.1s, color 0.1s;
+    }
+    .action-btn:hover { background: var(--fg); color: var(--bg); }
+
+    @media print {
+        .bottom-fixed, .top-actions, .nav-btn, .delete-btn,
+        .archive-btn, .section-actions, .add-row,
+        .inline-form, .archive-panel { display: none !important; }
+    }
+    @media (max-width: 520px) {
+        body { padding: 32px 16px 130px; }
+        .top-bar { flex-wrap: wrap; justify-content: center; }
+        .bottom-fixed { flex-wrap: wrap; padding: 12px 16px 16px; gap: 8px; }
+        .bottom-actions { justify-content: center; }
+        .stat-value { font-size: 20px; }
+    }
+</style>
+</head>
+<body>
+
+<div id="capture-area">
+    <div class="top-bar">
+        <div class="date-nav">
+            <button class="nav-btn" onclick="changeDate(-1)">‹</button>
+            <div class="date-display">
+                <div class="date-main" id="date-main">--. --. --</div>
+                <div class="date-sub"  id="date-sub">---</div>
+            </div>
+            <button class="nav-btn" onclick="changeDate(1)">›</button>
+        </div>
+        <div class="top-actions">
+            <div class="calendar-wrap">
+                <button class="pill-btn" onclick="openCalendar()">📅 날짜</button>
+                <input type="date" id="date-picker" onchange="onCalendarPick(event)">
+            </div>
+            <button class="pill-btn" onclick="goToday()">TODAY</button>
+        </div>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stat-cell">
+            <div class="stat-value" id="stat-streak">0</div>
+            <div class="stat-label">연속 작업일</div>
+        </div>
+        <div class="stat-cell">
+            <div class="stat-value" id="stat-systems">0</div>
+            <div class="stat-label">추적 시스템</div>
+        </div>
+        <div class="stat-cell">
+            <div class="stat-value" id="stat-today">0/0</div>
+            <div class="stat-label">오늘 완료</div>
+        </div>
+    </div>
+
+    <div id="board">
+        <div class="section">
+            <div class="section-header">
+                <div class="section-left">
+                    <span class="section-tag">NEW</span>
+                    <span class="section-title">새 시스템 만들기</span>
+                </div>
+            </div>
+            <div id="new-list"></div>
+            <div class="add-row" onclick="addNewDraft()">
+                <div class="add-icon">+</div>
+                <span class="add-label">새 시스템 추가</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <div class="section-left">
+                    <span class="section-tag">IMPROVE</span>
+                    <span class="section-title">기존 시스템 개선</span>
+                </div>
+                <div class="section-actions">
+                    <button class="ghost-btn" onclick="toggleRegisterForm()">+ 직접 등록</button>
+                    <button class="ghost-btn" onclick="toggleArchivePanel()">보관함</button>
+                </div>
+            </div>
+            <div class="inline-form" id="register-form">
+                <input type="text" id="register-input" placeholder="시스템 이름 입력"
+                    onkeydown="if(event.key==='Enter') submitRegisterForm()">
+                <button onclick="submitRegisterForm()">등록</button>
+            </div>
+            <div class="archive-panel" id="archive-panel"></div>
+            <div id="improve-list"></div>
+        </div>
+    </div>
+</div>
+
+<div class="bottom-fixed">
+    <span class="save-status" id="save-status"></span>
+    <div class="bottom-actions">
+        <button class="action-btn" onclick="copyAsText()">텍스트 복사</button>
+        <button class="action-btn" onclick="captureToday()" id="capture-btn">이미지 캡처</button>
+        <button class="action-btn" onclick="exportData()">내보내기</button>
+        <button class="action-btn" onclick="document.getElementById('import-file').click()">가져오기</button>
+        <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+</div>
+
+<script>
+    // ── Firebase compat 초기화 ──
+    const firebaseConfig = {
+        apiKey:            "AIzaSyDtJKYJ1yKCjIHayt505TAeGHO92mBAoeo",
+        authDomain:        "jh-system.firebaseapp.com",
+        projectId:         "jh-system",
+        storageBucket:     "jh-system.firebasestorage.app",
+        messagingSenderId: "268138545830",
+        appId:             "1:268138545830:web:0e29842146fbf633b26a67"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // ── 상수 ──
+    const DAYS_KO   = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+    let currentDate  = new Date();
+    let autosaveTimer = null;
+    let isSyncing    = false;
+
+    // ── 날짜 포맷 ──
+    function formatDate(d) {
+        const yy = String(d.getFullYear()).slice(-2);
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        return { key:`${yy}${mm}${dd}`, yy, mm, dd, dow: DAYS_KO[d.getDay()] };
+    }
+    function toIso(d) {
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    // ── 로컬 스토리지 헬퍼 ──
+    function genId() { return 'a_'+Date.now()+'_'+Math.random().toString(36).slice(2,7); }
+    function getRegistry() {
+        try { return JSON.parse(localStorage.getItem('asset_registry') || '[]'); } catch { return []; }
+    }
+    function saveRegistry(r) { localStorage.setItem('asset_registry', JSON.stringify(r)); }
+    function getDayData(key) {
+        try { return JSON.parse(localStorage.getItem(`buildup_${key}`) || '{"new":[],"improve":{}}'); }
+        catch { return {new:[],improve:{}}; }
+    }
+
+    // ── 상태 표시 ──
+    function setStatus(txt, type) {
+        const el = document.getElementById('save-status');
+        el.innerText = txt;
+        el.className = 'save-status' + (type ? ' '+type : '');
+    }
+
+    // ── 클라우드 pull ──
+    async function pullFromCloud() {
+        setStatus('☁ 불러오는 중...');
+        try {
+            const snap = await db.collection('buildup_sync').doc('main').get();
+            if (snap.exists) {
+                const payload = snap.data().payload || {};
+                Object.entries(payload).forEach(([k,v]) => {
+                    localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v));
+                });
+            }
+            setStatus('☁ 동기화됨', 'synced');
+        } catch(e) {
+            console.warn('pull 실패:', e);
+            setStatus('⚠ 오프라인 (로컬 사용)', 'error');
+        }
+    }
+
+    // ── 클라우드 push ──
+    async function pushToCloud() {
+        if (isSyncing) return;
+        isSyncing = true;
+        setStatus('☁ 저장 중...');
+        try {
+            const payload = {};
+            for (let i=0; i<localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k === 'asset_registry' || k.startsWith('buildup_')) {
+                    payload[k] = localStorage.getItem(k);
+                }
+            }
+            await db.collection('buildup_sync').doc('main').set({ payload, updatedAt: Date.now() });
+            const now = new Date();
+            const t = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            setStatus(`☁ 저장됨 ${t}`, 'synced');
+        } catch(e) {
+            console.warn('push 실패:', e);
+            setStatus('⚠ 저장 실패', 'error');
+        } finally {
+            isSyncing = false;
+        }
+    }
+
+    // ── 대시보드 갱신 ──
+    function updateDashboard() {
+        const f = formatDate(currentDate);
+        document.getElementById('date-main').innerText = `${f.yy}. ${f.mm}. ${f.dd}`;
+        document.getElementById('date-sub').innerText  = f.dow;
+        const day = getDayData(f.key);
+        renderNew(day.new || []);
+        renderImprove(f.key, day.improve || {});
+        closeRegisterForm(); closeArchivePanel();
+        updateProgress(); updateStats();
+    }
+
+    function changeDate(n) { currentDate.setDate(currentDate.getDate()+n); updateDashboard(); }
+    function goToday()     { currentDate = new Date(); updateDashboard(); }
+
+    function openCalendar() {
+        const p = document.getElementById('date-picker');
+        p.value = toIso(currentDate);
+        p.showPicker ? p.showPicker() : p.click();
+    }
+    function onCalendarPick(e) {
+        const [y,m,d] = e.target.value.split('-').map(Number);
+        if (!y) return;
+        currentDate = new Date(y, m-1, d);
+        updateDashboard();
+    }
+
+    // ── NEW 섹션 ──
+    function renderNew(items) {
+        const list = document.getElementById('new-list');
+        list.innerHTML = '';
+        if (!items.length) { addNewDraft(); return; }
+        items.forEach((it,i) => buildNewRow(it.id||genId(), it.title, it.content, it.done, i+1));
+    }
+
+    function addNewDraft() {
+        const list = document.getElementById('new-list');
+        buildNewRow(genId(), '', '', false, list.querySelectorAll('.topic-item').length+1);
+    }
+
+    function buildNewRow(id, title, content, done, num) {
+        const list = document.getElementById('new-list');
+        const el = document.createElement('div');
+        el.className = 'topic-item'; el.dataset.id = id;
+        el.innerHTML = `
+            <div class="topic-title-row">
+                <input type="checkbox" class="status-checkbox" ${done?'checked':''}
+                    onchange="syncTitleStrike(this); onAnyChange();">
+                <span class="item-num">${String(num).padStart(2,'0')}</span>
+                <input type="text" class="topic-title-input ${done?'done-title':''}"
+                    placeholder="새 시스템 제목"
+                    oninput="onAnyChange()"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();handleEnterNew(this);}">
+                <button class="delete-btn" onclick="this.closest('.topic-item').remove(); onAnyChange();">✕</button>
+            </div>
+            <div class="content-wrap">
+                <textarea class="content-input" placeholder="오늘 작업한 내용..."
+                    oninput="autoResize(this); onAnyChange();"></textarea>
+            </div>`;
+        el.querySelector('.topic-title-input').value = title||'';
+        el.querySelector('.content-input').value     = content||'';
+        list.appendChild(el);
+        autoResize(el.querySelector('textarea'));
+    }
+
+    function handleEnterNew(input) {
+        const items = document.querySelectorAll('#new-list .topic-item');
+        const last  = items[items.length-1];
+        if (last && last.querySelector('.topic-title-input').value.trim() === '') {
+            last.querySelector('.topic-title-input').focus();
+        } else {
+            addNewDraft();
+            setTimeout(() => {
+                const all = document.querySelectorAll('#new-list .topic-title-input');
+                all[all.length-1].focus();
+            }, 50);
+        }
+    }
+
+    // ── IMPROVE 섹션 ──
+    function renderImprove(dateKey, dataMap) {
+        const list    = document.getElementById('improve-list');
+        list.innerHTML = '';
+        const visible = getRegistry().filter(a => !a.archived && a.createdDateKey <= dateKey);
+        if (!visible.length) {
+            list.innerHTML = '<div class="empty-note">새 시스템을 저장하면 다음날부터 여기 자동으로 나타납니다.</div>';
+            return;
+        }
+        visible.forEach((asset, i) => {
+            const saved = dataMap[asset.id] || {content:'', done:false};
+            const el    = document.createElement('div');
+            el.className = 'topic-item'; el.dataset.id = asset.id;
+            el.innerHTML = `
+                <div class="topic-title-row">
+                    <input type="checkbox" class="status-checkbox" ${saved.done?'checked':''}
+                        onchange="syncTitleStrike(this); onAnyChange();">
+                    <span class="item-num">${String(i+1).padStart(2,'0')}</span>
+                    <input type="text" class="topic-title-input ${saved.done?'done-title':''}"
+                        oninput="onAnyChange()">
+                    <button class="archive-btn" onclick="archiveAsset('${asset.id}')">중단</button>
+                </div>
+                <div class="content-wrap">
+                    <textarea class="content-input" placeholder="오늘 개선한 내용..."
+                        oninput="autoResize(this); onAnyChange();"></textarea>
+                </div>`;
+            el.querySelector('.topic-title-input').value = asset.title;
+            el.querySelector('.content-input').value     = saved.content||'';
+            list.appendChild(el);
+            autoResize(el.querySelector('textarea'));
+        });
+    }
+
+    function archiveAsset(id) {
+        if (!confirm('이 시스템을 추적 목록에서 제거할까요?\n보관함에서 다시 복구할 수 있습니다.')) return;
+        saveRegistry(getRegistry().map(a => a.id===id ? {...a, archived:true} : a));
+        updateDashboard();
+    }
+    function restoreAsset(id) {
+        saveRegistry(getRegistry().map(a => a.id===id ? {...a, archived:false} : a));
+        updateDashboard();
+    }
+
+    // ── 직접 등록 폼 ──
+    function toggleRegisterForm() {
+        const f = document.getElementById('register-form');
+        f.classList.toggle('open'); closeArchivePanel();
+        if (f.classList.contains('open')) document.getElementById('register-input').focus();
+    }
+    function closeRegisterForm() { document.getElementById('register-form').classList.remove('open'); }
+    function submitRegisterForm() {
+        const input = document.getElementById('register-input');
+        const title = input.value.trim(); if (!title) return;
+        const f   = formatDate(currentDate);
+        const reg = getRegistry();
+        reg.push({id:genId(), title, createdDateKey:f.key, archived:false});
+        saveRegistry(reg); input.value=''; closeRegisterForm(); updateDashboard();
+    }
+
+    // ── 보관함 ──
+    function toggleArchivePanel() {
+        const p = document.getElementById('archive-panel');
+        p.classList.toggle('open'); closeRegisterForm();
+        if (p.classList.contains('open')) renderArchivePanel();
+    }
+    function closeArchivePanel() { document.getElementById('archive-panel').classList.remove('open'); }
+    function renderArchivePanel() {
+        const panel = document.getElementById('archive-panel');
+        const list  = getRegistry().filter(a => a.archived);
+        if (!list.length) {
+            panel.innerHTML = '<div class="empty-note" style="border:none;text-align:left;padding:4px 0;">보관된 시스템이 없습니다.</div>';
+            return;
+        }
+        panel.innerHTML = list.map(a => `
+            <div class="archive-row">
+                <span>${escHtml(a.title)}</span>
+                <button class="restore-btn" onclick="restoreAsset('${a.id}')">복구</button>
+            </div>`).join('');
+    }
+
+    // ── 통계 ──
+    function updateStats() {
+        document.getElementById('stat-systems').innerText = getRegistry().filter(a=>!a.archived).length;
+        document.getElementById('stat-streak').innerText  = calcStreak();
+    }
+    function calcStreak() {
+        let streak=0, cursor=new Date();
+        if (!localStorage.getItem(`buildup_${formatDate(cursor).key}`)) cursor.setDate(cursor.getDate()-1);
+        while (true) {
+            const f   = formatDate(cursor);
+            const raw = localStorage.getItem(`buildup_${f.key}`);
+            if (!raw) break;
+            const d   = JSON.parse(raw);
+            const has = (d.new||[]).some(i=>i.title) || Object.keys(d.improve||{}).length>0;
+            if (!has) break;
+            streak++; cursor.setDate(cursor.getDate()-1);
+        }
+        return streak;
+    }
+    function updateProgress() {
+        const cbs = document.querySelectorAll('.status-checkbox');
+        let done=0; cbs.forEach(c=>{ if(c.checked) done++; });
+        document.getElementById('stat-today').innerText = `${done}/${cbs.length}`;
+    }
+
+    // ── 유틸 ──
+    function autoResize(el) { el.style.height='auto'; el.style.height=el.scrollHeight+'px'; }
+    function escHtml(s) { const d=document.createElement('div'); d.innerText=s; return d.innerHTML; }
+    function syncTitleStrike(cb) {
+        const input = cb.closest('.topic-title-row').querySelector('.topic-title-input');
+        input.classList.toggle('done-title', cb.checked);
+    }
+
+    // ── 자동 저장 ──
+    function onAnyChange() {
+        updateProgress();
+        setStatus('입력 중...');
+        clearTimeout(autosaveTimer);
+        autosaveTimer = setTimeout(saveAll, 1500);
+    }
+
+    function saveAll() {
+        const f   = formatDate(currentDate);
+        const reg = getRegistry();
+
+        const newItems = [];
+        document.querySelectorAll('#new-list .topic-item').forEach(item => {
+            const id      = item.dataset.id;
+            const title   = item.querySelector('.topic-title-input').value.trim();
+            const content = item.querySelector('.content-input').value;
+            const done    = item.querySelector('.status-checkbox').checked;
+            if (!title) return;
+            newItems.push({id, title, content, done});
+            const ex = reg.find(a=>a.id===id);
+            if (ex) { ex.title=title; } else { reg.push({id, title, createdDateKey:f.key, archived:false}); }
+        });
+
+        const improveMap = {};
+        document.querySelectorAll('#improve-list .topic-item').forEach(item => {
+            const id      = item.dataset.id;
+            const title   = item.querySelector('.topic-title-input').value.trim();
+            const content = item.querySelector('.content-input').value;
+            const done    = item.querySelector('.status-checkbox').checked;
+            improveMap[id] = {content, done};
+            const ex = reg.find(a=>a.id===id);
+            if (ex && title) ex.title=title;
+        });
+
+        saveRegistry(reg);
+        localStorage.setItem(`buildup_${f.key}`, JSON.stringify({new:newItems, improve:improveMap}));
+        renderImprove(f.key, improveMap);
+        updateStats();
+        pushToCloud();
+    }
+
+    // ── 텍스트 복사 ──
+    function copyAsText() {
+        const f     = formatDate(currentDate);
+        const lines = [`[ ${f.yy}. ${f.mm}. ${f.dd} ${f.dow} ] 시스템 빌드업`, ''];
+
+        const newItems = document.querySelectorAll('#new-list .topic-item');
+        if (newItems.length) lines.push('── NEW 새 시스템 만들기');
+        newItems.forEach((item,i) => {
+            const title   = item.querySelector('.topic-title-input').value.trim();
+            const content = item.querySelector('.content-input').value.trim();
+            const done    = item.querySelector('.status-checkbox').checked;
+            if (!title) return;
+            lines.push(`${done?'[✓]':'[ ]'} ${String(i+1).padStart(2,'0')}. ${title}`);
+            if (content) content.split('\n').forEach(l => lines.push(`      ${l}`));
+        });
+
+        lines.push('');
+        const impItems = document.querySelectorAll('#improve-list .topic-item');
+        if (impItems.length) lines.push('── IMPROVE 기존 시스템 개선');
+        impItems.forEach((item,i) => {
+            const title   = item.querySelector('.topic-title-input').value.trim();
+            const content = item.querySelector('.content-input').value.trim();
+            const done    = item.querySelector('.status-checkbox').checked;
+            lines.push(`${done?'[✓]':'[ ]'} ${String(i+1).padStart(2,'0')}. ${title}`);
+            if (content) content.split('\n').forEach(l => lines.push(`      ${l}`));
+        });
+
+        const text = lines.join('\n');
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(()=>{
+                setStatus('텍스트 복사됨!', 'synced');
+                setTimeout(()=>setStatus('☁ 동기화됨','synced'), 2000);
+            });
+        } else {
+            const ta=document.createElement('textarea');
+            ta.value=text; document.body.appendChild(ta);
+            ta.select(); document.execCommand('copy');
+            document.body.removeChild(ta);
+            setStatus('텍스트 복사됨!', 'synced');
+        }
+    }
+
+    // ── 이미지 캡처 ──
+    function captureToday() {
+        const target = document.getElementById('capture-area');
+        const btn    = document.getElementById('capture-btn');
+        const orig   = btn.innerText;
+        btn.innerText = '캡처 중...';
+        const hide = ['.nav-btn','.top-actions','.delete-btn','.archive-btn',
+                      '.section-actions','.add-row','.inline-form','.archive-panel'];
+        html2canvas(target, {
+            backgroundColor:'#ffffff', scale:2,
+            onclone(doc){ hide.forEach(s=>doc.querySelectorAll(s).forEach(e=>e.style.display='none')); }
+        }).then(canvas => {
+            btn.innerText = orig;
+            canvas.toBlob(blob => {
+                if (navigator.clipboard && window.ClipboardItem) {
+                    navigator.clipboard.write([new ClipboardItem({'image/png':blob})])
+                        .then(()=>{ setStatus('이미지 복사됨!','synced'); setTimeout(()=>setStatus('☁ 동기화됨','synced'),2000); })
+                        .catch(()=>downloadBlob(blob));
+                } else { downloadBlob(blob); }
+            });
+        }).catch(()=>{ btn.innerText=orig; alert('캡처 중 오류가 발생했습니다.'); });
+    }
+
+    function downloadBlob(blob) {
+        const f   = formatDate(currentDate);
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href=url; a.download=`buildup-${f.key}.png`; a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // ── 내보내기 / 가져오기 ──
+    function exportData() {
+        const obj = {};
+        for (let i=0; i<localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k==='asset_registry'||k.startsWith('buildup_'))
+                obj[k] = JSON.parse(localStorage.getItem(k));
+        }
+        const f    = formatDate(new Date());
+        const blob = new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href=url; a.download=`buildup-backup-${f.key}.json`; a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function importData(e) {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+            try {
+                const obj = JSON.parse(ev.target.result);
+                if (!confirm('가져온 데이터로 현재 기록을 덮어씁니다. 계속할까요?')) return;
+                Object.keys(obj).forEach(k => localStorage.setItem(k, JSON.stringify(obj[k])));
+                alert('가져오기 완료'); updateDashboard();
+            } catch { alert('올바른 백업 파일이 아닙니다.'); }
+        };
+        reader.readAsText(file);
+        e.target.value='';
+    }
+
+    // ── 초기 실행 ──
+    window.addEventListener('load', async () => {
+        await pullFromCloud();
+        updateDashboard();
+    });
+</script>
+</body>
+</html>
